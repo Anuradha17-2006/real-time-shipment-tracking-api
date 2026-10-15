@@ -1,0 +1,732 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xsi:schemaLocation="         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd         http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd         http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd         http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd         http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd         http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+  <munit:config name="shipment-tracking-suite.xml" />
+  <!-- API main: the APIkit router failure should be mapped by the global handler. -->
+  <munit:test name="api-main-bad-request-global-handler" description="Maps APIkit bad request errors" expectedErrorType="APIKIT:BAD_REQUEST">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:router">
+        <munit-tools:then-return>
+          <munit-tools:error typeId="APIKIT:BAD_REQUEST" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event>
+        <munit:payload value="#[{}]" />
+      </munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-main" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="apikit:router" times="1" />
+    </munit:validation>
+  </munit:test>
+  <!-- Pending retry: unsupported carrier logs a warning instead of processing. -->
+  <munit:test name="pending-retry-unsupported-carrier-warns" description="Logs a warning for an unsupported carrier in a pending event">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Mark expired tracking events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 0}]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{pending_seq: 401, carrier_code: 'UNKNOWN', tracking_number: 'TRK-MUNIT-401', carrier_event_id: 'MUNIT-UNSUPPORTED-401', raw_payload: write({waybill: 'TRK-MUNIT-401', shipment_status: 'IN TRANSIT'}, 'application/json'), retry_count: 0}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Shipment Exists" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{shipment_id: 'SHIP-MUNIT-401', carrier_code: 'UNKNOWN', tracking_number: 'TRK-MUNIT-401'}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="retry-pending-shipment-events-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="mule:logger" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Log Unsupported" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+
+  <!-- Pending retry: a carrier event with no matching shipment logs a warning. -->
+  <munit:test name="pending-retry-shipment-lookup-empty-warns" description="Logs a warning when shipment lookup returns no result">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Mark expired tracking events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 0}]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{pending_seq: 402, carrier_code: 'DELHIVERY', tracking_number: 'DL-MUNIT-MISSING-402', carrier_event_id: 'MUNIT-MISSING-402', raw_payload: write({waybill: 'DL-MUNIT-MISSING-402', shipment_status: 'IN TRANSIT'}, 'application/json'), retry_count: 0}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Shipment Exists" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="retry-pending-shipment-events-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="mule:logger" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Log Shipment Missing During Retry" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+
+  <!-- Pending retry: missing tracking number logs a warning and skips shipment lookup. -->
+  <munit:test name="pending-retry-missing-tracking-number-warns" description="Logs a warning when a pending event has no tracking number">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Mark expired tracking events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 0}]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{pending_seq: 403, carrier_code: 'DELHIVERY', tracking_number: '', carrier_event_id: 'MUNIT-NOTRACK-403', raw_payload: '{}', retry_count: 0}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="retry-pending-shipment-events-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="mule:logger" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Log Pending Event Missing Tracking Number" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+      <munit-tools:verify-call processor="db:select" times="0">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Shipment Exists" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+
+  <!-- Scheduled pending retry, empty result path. -->
+  <munit:test name="api-main-method-not-allowed-handler" description="Exercises global APIKIT 405 handler" expectedErrorType="APIKIT:METHOD_NOT_ALLOWED">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:router">
+        <munit-tools:then-return><munit-tools:error typeId="APIKIT:METHOD_NOT_ALLOWED" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event><munit:payload value="#[{}]" /></munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-main" />
+    </munit:execution>
+    <munit:validation><munit-tools:verify-call processor="apikit:router" times="1" /></munit:validation>
+  </munit:test>
+  <munit:test name="api-main-not-acceptable-handler" description="Exercises global APIKIT 406 handler" expectedErrorType="APIKIT:NOT_ACCEPTABLE">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:router">
+        <munit-tools:then-return><munit-tools:error typeId="APIKIT:NOT_ACCEPTABLE" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event><munit:payload value="#[{}]" /></munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-main" />
+    </munit:execution>
+    <munit:validation><munit-tools:verify-call processor="apikit:router" times="1" /></munit:validation>
+  </munit:test>
+  <munit:test name="api-main-unsupported-media-type-handler" description="Exercises global APIKIT 415 handler" expectedErrorType="APIKIT:UNSUPPORTED_MEDIA_TYPE">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:router">
+        <munit-tools:then-return><munit-tools:error typeId="APIKIT:UNSUPPORTED_MEDIA_TYPE" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event><munit:payload value="#[{}]" /></munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-main" />
+    </munit:execution>
+    <munit:validation><munit-tools:verify-call processor="apikit:router" times="1" /></munit:validation>
+  </munit:test>
+  <munit:test name="api-main-not-implemented-handler" description="Exercises global APIKIT 501 handler" expectedErrorType="APIKIT:NOT_IMPLEMENTED">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:router">
+        <munit-tools:then-return><munit-tools:error typeId="APIKIT:NOT_IMPLEMENTED" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event><munit:payload value="#[{}]" /></munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-main" />
+    </munit:execution>
+    <munit:validation><munit-tools:verify-call processor="apikit:router" times="1" /></munit:validation>
+  </munit:test>
+  <munit:test name="api-main-catch-all-handler" description="Exercises global catch-all error handler" expectedErrorType="MULE:EXPRESSION">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:router">
+        <munit-tools:then-return><munit-tools:error typeId="MULE:EXPRESSION" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event><munit:payload value="#[{}]" /></munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-main" />
+    </munit:execution>
+    <munit:validation><munit-tools:verify-call processor="apikit:router" times="1" /></munit:validation>
+  </munit:test>
+  <munit:test name="api-console-not-found" description="Exercises the API console not-found response" expectedErrorType="APIKIT:NOT_FOUND">
+    <munit:behavior>
+      <munit-tools:mock-when processor="apikit:console">
+        <munit-tools:then-return>
+          <munit-tools:error typeId="APIKIT:NOT_FOUND" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event>
+        <munit:payload value="#[{}]" />
+      </munit:set-event>
+      <flow-ref name="real-time-shipment-tracking-api-console" />
+    </munit:execution>
+  </munit:test>
+  <!-- Webhook: invalid/unsupported carrier is handled without calling the database. -->
+  <munit:test name="webhook-rejects-unsupported-carrier" description="Rejects an unsupported carrier">
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'UNKNOWN'}, headers: {}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[401]" />
+      <munit-tools:assert-equals actual="#[payload.received]" expected="#[false]" />
+    </munit:validation>
+  </munit:test>
+  <!-- Delhivery webhook: invalid API key must be rejected before shipment processing. -->
+  <munit:test name="webhook-delhivery-invalid-api-key" description="Rejects Delhivery events with an invalid API key">
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{waybill: 'DL-MUNIT-INVALID-001', shipment_status: 'OUT FOR DELIVERY'}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'DELHIVERY'}, headers: {'x-api-key': 'invalid-munit-key', 'x-carrier-event-id': 'MUNIT-DEL-INVALID-001'}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[401]" />
+      <munit-tools:assert-equals actual="#[payload.received]" expected="#[false]" />
+      <munit-tools:verify-call processor="db:select" times="0" />
+    </munit:validation>
+  </munit:test>
+  <!-- Delhivery webhook: use the configured key; mock only the database duplicate lookup. -->
+  <munit:test name="webhook-delhivery-valid-event" description="Validates and normalizes a Delhivery event">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{event_seq: 1}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{waybill: 'DL-MUNIT-VALID-001', shipment_status: 'OUT FOR DELIVERY', location: {facilityCode: 'MUNIT', city: 'Test City', state: 'Test State'}}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'DELHIVERY'}, headers: {'x-api-key': Mule::p('secure::delhivery.webhook.api-key'), 'x-carrier-event-id': 'MUNIT-DEL-VALID-001'}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.event.carrierCode]" expected="#['DELHIVERY']" />
+      <munit-tools:assert-equals actual="#[vars.event.normalisedMilestone]" expected="#['OUT_FOR_DELIVERY']" />
+      <munit-tools:assert-equals actual="#[vars.event.trackingNumber]" expected="#['DL-MUNIT-VALID-001']" />
+      <munit-tools:assert-equals actual="#[payload.duplicate]" expected="#[true]" />
+    </munit:validation>
+  </munit:test>
+  <!-- BlueDart webhook: mock signature verification, then verify the carrier mapping. -->
+  <munit:test name="webhook-bluedart-valid-event" description="Normalizes a BlueDart event after valid signature verification">
+    <munit:behavior>
+      <munit-tools:mock-when processor="java:invoke-static">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Invoke static" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:variables>
+            <munit-tools:variable key="signatureValid" value="#[true]" />
+          </munit-tools:variables>
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{event_seq: 1}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{awbNumber: 'BD-MUNIT-VALID-001', statusCode: 'OOD', scanLocation: {facilityCode: 'MUNIT', city: 'Test City', state: 'Test State'}}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'BLUEDART'}, headers: {'x-carrier-signature': 'mock-signature', 'x-carrier-event-id': 'MUNIT-BD-VALID-001'}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.signatureValid]" expected="#[true]" />
+      <munit-tools:assert-equals actual="#[vars.event.carrierCode]" expected="#['BLUEDART']" />
+      <munit-tools:assert-equals actual="#[vars.event.normalisedMilestone]" expected="#['OUT_FOR_DELIVERY']" />
+      <munit-tools:assert-equals actual="#[vars.event.trackingNumber]" expected="#['BD-MUNIT-VALID-001']" />
+      <munit-tools:assert-equals actual="#[payload.duplicate]" expected="#[true]" />
+    </munit:validation>
+  </munit:test>
+  <!-- BlueDart webhook: invalid signature must stop before database access. -->
+  <munit:test name="webhook-bluedart-invalid-signature" description="Rejects a BlueDart event with an invalid signature">
+    <munit:behavior>
+      <munit-tools:mock-when processor="java:invoke-static">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Invoke static" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:variables>
+            <munit-tools:variable key="signatureValid" value="#[false]" />
+          </munit-tools:variables>
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{awbNumber: 'BD-MUNIT-INVALID-001', statusCode: 'OOD'}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'BLUEDART'}, headers: {'x-carrier-signature': 'invalid-signature', 'x-carrier-event-id': 'MUNIT-BD-INVALID-001'}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[401]" />
+      <munit-tools:assert-equals actual="#[payload.received]" expected="#[false]" />
+      <munit-tools:verify-call processor="db:select" times="0" />
+    </munit:validation>
+  </munit:test>
+  <!-- Database connection test flow. -->
+  <munit:test name="database-connection-test" description="Returns the mocked database connection result">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Select" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{connection_test: 1}]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="real-time-shipment-tracking-apiFlow1" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[payload[0].connection_test]" expected="#[1]" />
+    </munit:validation>
+  </munit:test>
+  <!-- Shipment processing: duplicate event. -->
+  <munit:test name="shipment-event-duplicate" description="Ignores an already stored carrier event">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{event_seq: 1}]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <set-variable variableName="event" value="#[{carrierCode: 'DELHIVERY', carrierEventId: 'MUNIT-DUP-001', trackingNumber: 'DL-MUNIT-001'}]" />
+      <flow-ref name="process-shipment-event-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[payload.duplicate]" expected="#[true]" />
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[200]" />
+      <munit-tools:verify-call processor="db:insert" times="0" />
+    </munit:validation>
+  </munit:test>
+  <!-- Shipment processing: known shipment success path. -->
+  <munit:test name="shipment-event-known-shipment" description="Stores a new event and updates a known shipment">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Lookup Shipment" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{shipment_id: 'SHIP-MUNIT-001', carrier_code: 'DELHIVERY', tracking_number: 'DL-MUNIT-001', current_milestone: 'IN_TRANSIT', milestone_rank: 3, promised_delivery: null, estimated_delivery: null, order_id: null, customer_id: null, customer_email: 'munit@example.com', is_delayed: false}]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:insert">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Tracking Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 1}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Shipment Milestone" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 1}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <set-variable variableName="event" value="#[{carrierCode: 'DELHIVERY', carrierEventId: 'MUNIT-KNOWN-001', trackingNumber: 'DL-MUNIT-001', rawStatusCode: 'OUT FOR DELIVERY', normalisedMilestone: 'OUT_FOR_DELIVERY', milestoneRank: 5, eventDateTime: now(), facilityCode: 'MUNIT', city: 'Test City', state: 'Test State', revisedEta: null}]" />
+      <flow-ref name="process-shipment-event-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[payload.received]" expected="#[true]" />
+      <munit-tools:assert-equals actual="#[payload.status]" expected="#['OUT_FOR_DELIVERY']" />
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[200]" />
+      <munit-tools:verify-call processor="db:insert" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Tracking Event" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+      <munit-tools:verify-call processor="db:update" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Shipment Milestone" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <!-- Shipment processing: shipment is not yet known. -->
+  <munit:test name="shipment-event-unknown-shipment" description="Stores an event as pending when shipment lookup is empty">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Lookup Shipment" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:insert">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Store Pending Event" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 1}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <set-variable variableName="rawBody" value="#[{waybill: 'DL-MUNIT-002', shipment_status: 'OUT FOR DELIVERY'}]" />
+      <set-variable variableName="event" value="#[{carrierCode: 'DELHIVERY', carrierEventId: 'MUNIT-PENDING-001', trackingNumber: 'DL-MUNIT-002', rawStatusCode: 'OUT FOR DELIVERY', normalisedMilestone: 'OUT_FOR_DELIVERY', milestoneRank: 5, eventDateTime: now(), facilityCode: '', city: '', state: '', revisedEta: null}]" />
+      <flow-ref name="process-shipment-event-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[payload.pending]" expected="#[true]" />
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[202]" />
+    </munit:validation>
+  </munit:test>
+  <!-- Scheduled pending retry, empty result path. -->
+  <munit:test name="pending-retry-no-resolvable-events" description="Completes when no pending shipment events can be resolved">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Mark expired tracking events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 0}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="retry-pending-shipment-events-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="db:select" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <!-- Scheduled notification retry: empty result path. -->
+  <munit:test name="notification-retry-no-unnotified-events" description="Completes when there are no unnotified events">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Select" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="retry-unnotified-notifications-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="jms:publish" times="0" />
+    </munit:validation>
+  </munit:test>
+  <!-- Scheduled notification retry: publish then mark notified. -->
+  <munit:test name="notification-retry-publishes-and-updates" description="Publishes an unnotified customer-facing event">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Select" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{carrier_code: 'DELHIVERY', carrier_event_id: 'MUNIT-NOTIFY-001', shipment_id: 'SHIP-MUNIT-001', tracking_number: 'DL-MUNIT-001', carrier_status: 'Out for Delivery', normalised_status: 'OUT_FOR_DELIVERY', event_datetime: now(), facility_code: 'MUNIT', city: 'Test City', state: 'Test State', correlation_id: 'MUNIT-CORR-001', order_id: 'ORDER-MUNIT-001', customer_id: 'CUSTOMER-MUNIT-001', customer_email: 'munit@example.com', estimated_delivery: null, promised_delivery: null, is_delayed: false}]]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="jms:publish">
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Update" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 1}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <flow-ref name="retry-unnotified-notifications-flow" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="jms:publish" times="1" />
+      <munit-tools:verify-call processor="db:update" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Update" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <!-- JMS consumer: first delivery. -->
+  <munit:test name="notification-consumer-new-message" description="Records and logs a new notification">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:insert">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Record Notification ID" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 1}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event>
+        <munit:payload value="#[{correlationId: 'MUNIT-CONSUMER-001', payload: {shipmentId: 'SHIP-MUNIT-001', milestone: 'OUT_FOR_DELIVERY', statusDescription: 'Out for Delivery'}}]" />
+      </munit:set-event>
+      <flow-ref name="Consume-Shipment-Notifications" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="mule:logger" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Log Consumed Shipment Notification" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <!-- JMS consumer: duplicate delivery. -->
+  <munit:test name="notification-consumer-duplicate-message" description="Skips logging a duplicate notification as new">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:insert">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Record Notification ID" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[{affectedRows: 0}]" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event>
+        <munit:payload value="#[{correlationId: 'MUNIT-CONSUMER-DUP-001', payload: {shipmentId: 'SHIP-MUNIT-001', milestone: 'OUT_FOR_DELIVERY', statusDescription: 'Out for Delivery'}}]" />
+      </munit:set-event>
+      <flow-ref name="Consume-Shipment-Notifications" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="mule:logger" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Logger" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <!-- Webhook format validation: authenticated but incomplete carrier payloads return 400. -->
+  <munit:test name="webhook-delhivery-invalid-payload" description="Rejects an authenticated Delhivery payload without a waybill">
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{shipment_status: 'OUT FOR DELIVERY'}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'DELHIVERY'}, headers: {'x-api-key': Mule::p('secure::delhivery.webhook.api-key'), 'x-carrier-event-id': 'MUNIT-DEL-BAD-PAYLOAD'}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[400]" />
+      <munit-tools:assert-equals actual="#[payload.received]" expected="#[false]" />
+    </munit:validation>
+  </munit:test>
+  <munit:test name="webhook-bluedart-invalid-payload" description="Rejects an authenticated BlueDart payload without an AWB number">
+    <munit:behavior>
+      <munit-tools:mock-when processor="java:invoke-static">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Invoke static" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:variables><munit-tools:variable key="signatureValid" value="#[true]" /></munit-tools:variables>
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event cloneOriginalEvent="false">
+        <munit:payload value="#[{statusCode: 'OOD'}]" />
+        <munit:attributes value="#[{uriParams: {carrierCode: 'BLUEDART'}, headers: {'x-carrier-signature': 'mock-signature', 'x-carrier-event-id': 'MUNIT-BD-BAD-PAYLOAD'}}]" />
+      </munit:set-event>
+      <flow-ref name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[400]" />
+      <munit-tools:assert-equals actual="#[payload.received]" expected="#[false]" />
+    </munit:validation>
+  </munit:test>
+  <!-- Pending retry: process both carrier-specific transforms while mocking downstream shipment processing. -->
+  <munit:test name="pending-retry-resolves-bluedart-event" description="Transforms and deletes a resolved BlueDart pending event">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Mark expired tracking events" /></munit-tools:with-attributes>
+        <munit-tools:then-return><munit-tools:payload value="#[{affectedRows: 0}]" mediaType="application/java" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" /></munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{pending_seq: 301, carrier_code: 'BLUEDART', tracking_number: 'BD-PENDING-301', carrier_event_id: 'MUNIT-PENDING-BD-301', raw_payload: write({awbNumber: 'BD-PENDING-301', referenceNumber: 'SHIP-MUNIT-301', statusCode: 'OOD', scanLocation: {facilityCode: 'MUNIT', city: 'Test City', state: 'Test State'}}, 'application/json'), retry_count: 0}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Check Shipment Exists" /></munit-tools:with-attributes>
+        <munit-tools:then-return><munit-tools:payload value="#[[{shipment_id: 'SHIP-MUNIT-301'}]]" mediaType="application/java" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="mule:flow-ref">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="name" whereValue="#[&apos;process-shipment-event-flow&apos;]" /></munit-tools:with-attributes>
+        <munit-tools:then-return><munit-tools:payload value="#[{}]" mediaType="application/java" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution><flow-ref name="retry-pending-shipment-events-flow" /></munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.event.normalisedMilestone]" expected="#['OUT_FOR_DELIVERY']" />
+      <munit-tools:assert-equals actual="#[vars.event.trackingNumber]" expected="#['BD-PENDING-301']" />
+      <munit-tools:verify-call processor="db:delete" times="1"><munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Delete Processed Pending Event" /></munit-tools:with-attributes></munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <munit:test name="pending-retry-resolves-delhivery-event" description="Transforms and deletes a resolved Delhivery pending event">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:update">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Mark expired tracking events" /></munit-tools:with-attributes>
+        <munit-tools:then-return><munit-tools:payload value="#[{affectedRows: 0}]" mediaType="application/java" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Find Resolvable Pending Events" /></munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:payload value="#[[{pending_seq: 302, carrier_code: 'DELHIVERY', tracking_number: 'DL-PENDING-302', carrier_event_id: 'MUNIT-PENDING-DL-302', raw_payload: write({waybill: 'DL-PENDING-302', referenceNumber: 'SHIP-MUNIT-302', shipment_status: 'OUT FOR DELIVERY', location: {facilityCode: 'MUNIT', city: 'Test City', state: 'Test State'}}, 'application/json'), retry_count: 0}]]" mediaType="application/java" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="db:select">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Check Shipment Exists" /></munit-tools:with-attributes>
+        <munit-tools:then-return><munit-tools:payload value="#[[{shipment_id: 'SHIP-MUNIT-302'}]]" mediaType="application/java" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+      <munit-tools:mock-when processor="mule:flow-ref">
+        <munit-tools:with-attributes><munit-tools:with-attribute attributeName="name" whereValue="#[&apos;process-shipment-event-flow&apos;]" /></munit-tools:with-attributes>
+        <munit-tools:then-return><munit-tools:payload value="#[{}]" mediaType="application/java" /></munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution><flow-ref name="retry-pending-shipment-events-flow" /></munit:execution>
+    <munit:validation>
+      <munit-tools:assert-equals actual="#[vars.event.normalisedMilestone]" expected="#['OUT_FOR_DELIVERY']" />
+      <munit-tools:assert-equals actual="#[vars.event.trackingNumber]" expected="#['DL-PENDING-302']" />
+      <munit-tools:verify-call processor="db:delete" times="1"><munit-tools:with-attributes><munit-tools:with-attribute attributeName="doc:name" whereValue="Delete Processed Pending Event" /></munit-tools:with-attributes></munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+  <munit:test name="notification-consumer-db-failure-propagates" description="Propagates a database failure so the JMS listener can redeliver the message" expectedErrorType="DB:CONNECTIVITY">
+    <munit:behavior>
+      <munit-tools:mock-when processor="db:insert">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Record Notification ID" />
+        </munit-tools:with-attributes>
+        <munit-tools:then-return>
+          <munit-tools:error typeId="DB:CONNECTIVITY" />
+        </munit-tools:then-return>
+      </munit-tools:mock-when>
+    </munit:behavior>
+    <munit:execution>
+      <munit:set-event>
+        <munit:payload value="#[{correlationId: 'MUNIT-CONSUMER-FAIL-001', shipmentId: 'SHIP-MUNIT-FAIL-001', milestone: 'OUT_FOR_DELIVERY'}]" mediaType="application/java" />
+      </munit:set-event>
+      <flow-ref name="Consume-Shipment-Notifications" />
+    </munit:execution>
+    <munit:validation>
+      <munit-tools:verify-call processor="db:insert" times="1">
+        <munit-tools:with-attributes>
+          <munit-tools:with-attribute attributeName="doc:name" whereValue="Record Notification ID" />
+        </munit-tools:with-attributes>
+      </munit-tools:verify-call>
+    </munit:validation>
+  </munit:test>
+</mule>
+
+
+
+

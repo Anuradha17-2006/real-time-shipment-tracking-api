@@ -1,0 +1,22 @@
+
+carrierMappings:
+  BLUEDART:
+    statusCodes:
+      PU: PICKED_UP
+      IT: IN_TRANSIT
+      OOD: OUT_FOR_DELIVERY
+      DL: DELIVERED
+      EX: EXCEPTION
+      RTO: RETURN_TO_ORIGIN
+
+  DELHIVERY:
+    statusCodes:
+      Manifested: PICKED_UP
+      "Picked Up": PICKED_UP
+      In Transit: IN_TRANSIT
+      "Reached Hub": ARRIVED_AT_HUB
+      "Out for Delivery": OUT_FOR_DELIVERY
+      Undelivered: DELIVERY_ATTEMPTED
+      Delivered: DELIVERED
+      Exception: EXCEPTION
+      RTO: RETURN_TO_ORIGIN

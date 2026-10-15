@@ -1,0 +1,765 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties" xmlns:java="http://www.mulesoft.org/schema/mule/java" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/java http://www.mulesoft.org/schema/mule/java/current/mule-java.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+    <http:listener-config name="real-time-shipment-tracking-api-httpListenerConfig">
+        <http:listener-connection host="0.0.0.0" port="8081" />
+    </http:listener-config>
+    <apikit:config name="real-time-shipment-tracking-api-config" api="real-time-shipment-tracking-api.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus"/>
+<configuration doc:name="Global Configuration" defaultErrorHandler-ref="Global_Error_Handler" />
+<configuration-properties file="config.properties" />
+<global-property name="secure.key" value="ShipTrackKey2026SecureKey1234567" />
+<secure-properties:config name="Secure_Properties_Config"
+    doc:name="Secure Properties Config"
+    doc:id="481f0e84-3a3f-4152-a50b-679dedae1aeb"
+    file="secure.properties"
+    key="${secure.key}">
+    <secure-properties:encrypt algorithm="AES" mode="CBC"/>
+</secure-properties:config>
+	<os:object-store name="Object_store" doc:name="Object store" doc:id="ccb5749f-0f75-41ce-a639-1ec644fdd48c" entryTtl="86400" />
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="b97798f6-c3eb-43c3-bff3-8dbdd0ed2beb" >
+		<db:my-sql-connection host="localhost" port="3306" user="root" password="Anuradha@1" database="shipment_tracking_db" />
+	</db:config>
+	<jms:config name="JMS_Config" doc:name="JMS Config" doc:id="0acd54b0-daf5-4552-ba32-6841f68eb79a" >
+	<jms:active-mq-connection>
+    		<jms:factory-configuration brokerUrl="tcp://localhost:61616" />
+	</jms:active-mq-connection>
+	<jms:consumer-config maxRedelivery="3" />
+	</jms:config>
+	<flow name="real-time-shipment-tracking-api-main">
+        <http:listener config-ref="real-time-shipment-tracking-api-httpListenerConfig" path="/api/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+        <set-variable value="#[payload]" doc:name="Set Variable" doc:id="2142f9af-e0d3-4a76-bbfa-f2b58d24fe7d" variableName="rawBody"/>
+		<apikit:router config-ref="real-time-shipment-tracking-api-config" />
+        <error-handler ref="Global_Error_Handler"/>
+    </flow>
+    <flow name="real-time-shipment-tracking-api-console">
+        <http:listener config-ref="real-time-shipment-tracking-api-httpListenerConfig" path="/console/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:console config-ref="real-time-shipment-tracking-api-config" />
+        <error-handler ref="Global_Error_Handler"/>
+    </flow>
+	<flow name="post:\webhooks\carriers\(carrierCode):application\json:real-time-shipment-tracking-api-config">
+        <ee:transform doc:name="Transform Message">
+            <ee:variables>
+                <ee:set-variable variableName="carrierCode">attributes.uriParams.'carrierCode'</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <choice doc:name="Choice" doc:id="897c5242-de04-48a8-8725-e7e7622b09ee" >
+			<when expression='#[upper(vars.carrierCode default "") == "BLUEDART"]'>
+				<java:invoke-static method="verify(byte[],java.lang.String,java.lang.String)" doc:name="Invoke static" doc:id="e9fb1188-dea1-472a-97c5-763623c557a5" class="com.shipmenttracking.security.WebhookSignatureVerifier" target="signatureValid">
+			<java:args><![CDATA[#[{
+  rawBody: vars.rawBody,
+  secret: Mule::p("secure::bluedart.webhook.secret"),
+  suppliedSignature: attributes.headers.'x-carrier-signature' default ""
+}]]]></java:args>
+		</java:invoke-static>
+			</when>
+			<when expression='#[upper(vars.carrierCode default "") == "DELHIVERY"]'>
+				<set-variable value="#[(attributes.headers.'x-api-key' default &quot;&quot;) != &quot;&quot; and&#10;  (Mule::p(&quot;secure::delhivery.webhook.api-key&quot;) default &quot;&quot;) != &quot;&quot; and&#10;  (attributes.headers.'x-api-key' default &quot;&quot;) ==&#10;    (Mule::p(&quot;secure::delhivery.webhook.api-key&quot;) default &quot;&quot;)]" doc:name="Validate Delhivery API Key" doc:id="7f6f4de5-5ef3-4fe8-93c7-c2b358b83df7" variableName="signatureValid"/>
+			</when>
+			<otherwise >
+				<set-variable value="#[false]" doc:name="Reject Unsupported Carrier" doc:id="1bc0ced2-f14a-405c-b1ed-283d45b860f7" variableName="signatureValid"/>
+			</otherwise>
+		</choice>
+		<choice doc:name="Validate Required Headers" doc:id="c22b392b-d20c-478c-8a2a-a9e281c52c42">
+    <when expression="#[vars.signatureValid == true]">
+        <logger level="INFO" message="Required webhook headers are present" />
+				<choice doc:name="Choice" doc:id="fb390ed3-27dc-4947-afee-0346ec0da3ac" >
+					<when expression='#[upper(attributes.uriParams.carrierCode) == "BLUEDART"]'>
+						<set-variable value="#[payload]" doc:name="Save Original Webhook" doc:id="db57dde1-d359-4dc1-b9e6-e771e6f3b566" variableName="rawBody"/>
+						<ee:transform doc:name="Transform Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+var body = payload
+var status = upper(trim(body.statusCode default ""))
+var milestone =
+    if (status == "PU") "PICKED_UP"
+    else if (status == "IT") "IN_TRANSIT"
+    else if (status == "OOD") "OUT_FOR_DELIVERY"
+    else if (status == "DL") "DELIVERED"
+    else if (status == "EX") "EXCEPTION"
+    else if (status == "RTO") "RETURN_TO_ORIGIN"
+    else "EXCEPTION"
+---
+{
+    received: true,
+    carrierCode: upper(attributes.uriParams.carrierCode),
+    carrierEventId: attributes.headers.'x-carrier-event-id' default "",
+    trackingNumber: body.awbNumber default "",
+    shipmentId: body.referenceNumber default "",
+    rawStatusCode: body.statusCode default "",
+    normalisedMilestone: milestone,
+    milestoneRank:
+        if (milestone == "LABEL_CREATED") 1
+        else if (milestone == "PICKED_UP") 2
+        else if (milestone == "IN_TRANSIT") 3
+        else if (milestone == "ARRIVED_AT_HUB") 4
+        else if (milestone == "OUT_FOR_DELIVERY") 5
+        else if (milestone == "DELIVERY_ATTEMPTED") 6
+        else if (milestone == "DELIVERED") 7
+        else 0,
+    eventDateTime: body.eventDateTime default null,
+    facilityCode: body.scanLocation.facilityCode default "",
+    city: body.scanLocation.city default "",
+    state: body.scanLocation.state default "",
+    country: body.scanLocation.country default "",
+    latitude: body.scanLocation.latitude default null,
+    longitude: body.scanLocation.longitude default null,
+    revisedEta: body.revisedEta default null,
+    remarks: body.remarks default "",
+    statusAdvanced: false,
+    notificationQueued: false
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+						<choice doc:name="Choice" doc:id="ac2032f4-6d9a-4c68-a715-a43a186bc2a6" >
+							<when expression='#[!isEmpty(payload.trackingNumber default "") and&#10;  !isEmpty(payload.carrierEventId default "") and&#10;  !isEmpty(payload.rawStatusCode default "") and&#10;  payload.normalisedMilestone != "UNKNOWN"]'>
+								<logger level="INFO" doc:name="Logger" doc:id="e61d4192-59d3-44d2-be10-4e24a77390e6" message='#["Validated shipment event: " ++ payload.trackingNumber]'/>
+								<set-variable value="#[payload]" doc:name="Set Variable" doc:id="4b0b30e0-34cc-4eda-8772-40408a549f2e" variableName="event"/>
+								<flow-ref doc:name="Flow Reference" doc:id="b99fc0de-aef9-41e1-927a-1b2c956d11ee" name="process-shipment-event-flow"/>
+							</when>
+							<otherwise >
+								<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: false,&#10;  message: "Invalid or unsupported carrier event"&#10;}]' doc:name="Set Payload" doc:id="d62431da-cb57-4c99-b758-c9477c5a6ea2" />
+								<set-variable value="#[400]" doc:name="Set Variable" doc:id="816bec18-adcf-4f85-9569-b36c84ded684" variableName="httpStatus"/>
+							</otherwise>
+						</choice>
+					</when>
+					<when expression='#[upper(attributes.uriParams.carrierCode) == "DELHIVERY"]'>
+    <!-- Add Delhivery Transform Message here -->
+						<set-variable value="#[payload]" doc:name="Save Original Webhook" doc:id="4c0ca0c8-ae32-4b69-8f8f-54c5546541bb" variableName="rawBody"/>
+						<ee:transform doc:name="Transform Message" doc:id="2828fb52-5961-496f-99b0-e7ba7861bc0a" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[
+%dw 2.0
+output application/json
+var body = payload
+var status = upper(trim(body.shipment_status default ""))
+var milestone =
+    if (status == "PICKED UP") "PICKED_UP"
+    else if (status == "IN TRANSIT") "IN_TRANSIT"
+    else if (status == "OUT FOR DELIVERY") "OUT_FOR_DELIVERY"
+    else if (status == "DELIVERED") "DELIVERED"
+    else if (status == "EXCEPTION") "EXCEPTION"
+    else if (status == "RTO") "RETURN_TO_ORIGIN"
+    else "EXCEPTION"
+---
+{
+    received: true,
+    carrierCode: upper(attributes.uriParams.carrierCode),
+    carrierEventId: attributes.headers.'x-carrier-event-id' default "",
+    trackingNumber: body.waybill default "",
+    shipmentId: body.referenceNumber default "",
+    rawStatusCode: body.shipment_status default "",
+    normalisedMilestone: milestone,
+    milestoneRank:
+        if (milestone == "LABEL_CREATED") 1
+        else if (milestone == "PICKED_UP") 2
+        else if (milestone == "IN_TRANSIT") 3
+        else if (milestone == "ARRIVED_AT_HUB") 4
+        else if (milestone == "OUT_FOR_DELIVERY") 5
+        else if (milestone == "DELIVERY_ATTEMPTED") 6
+        else if (milestone == "DELIVERED") 7
+        else 0,
+    eventDateTime: body.status_date default null,
+    facilityCode: body.location.facilityCode default "",
+    city: body.location.city default "",
+    state: body.location.state default "",
+    country: body.location.country default "IN",
+    latitude: body.location.latitude default null,
+    longitude: body.location.longitude default null,
+    revisedEta: body.expected_delivery_date default null,
+    remarks: body.status_description default "",
+    statusAdvanced: false,
+    notificationQueued: false
+}
+]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<choice doc:name="Choice" doc:id="525d241c-b529-457b-ba1d-af9fe518bdd9" >
+							<when expression='#[!isEmpty(payload.trackingNumber default "")&#10;  and !isEmpty(payload.carrierEventId default "")&#10;  and !isEmpty(payload.rawStatusCode default "")&#10;  and !isEmpty(payload.normalisedMilestone default "UNKNOWN")&#10;  and (payload.normalisedMilestone default "UNKNOWN") != "UNKNOWN"]'>
+								<logger level="INFO" doc:name="Logger" doc:id="b683cff6-7e7e-44f8-a395-dd207cae5c94" message='#["Validated Delhivery event: " ++ payload.trackingNumber]'/>
+								<set-variable value="#[payload]" doc:name="Set Variable" doc:id="8660f916-2465-4b85-8e88-36d55eee0ddf" variableName="event"/>
+								<flow-ref doc:name="Flow Reference" doc:id="b152c587-f03c-463c-a755-95869ac92301" name="process-shipment-event-flow"/>
+							</when>
+							<otherwise >
+								<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: false,&#10;  message: "Invalid or unsupported carrier event"&#10;}]' doc:name="Set Payload" doc:id="f4ced589-b83b-4bbe-bdb8-e423a581ee5a" mimeType="application/json"/>
+								<set-variable value="#[400]" doc:name="Set Variable" doc:id="37db2bf9-bfb3-4401-9e19-c4b1713adba1" variableName="httpStatus"/>
+								<logger level="INFO" doc:name="Logger" doc:id="b7e4b1f0-38a6-4d1b-ace3-73b7576dc0e4" message='#["INVALID BRANCH: httpStatus=" ++ (vars.httpStatus as String)]'/>
+							</otherwise>
+						</choice>
+</when>
+					<otherwise >
+						<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: false,&#10;  message: "Unsupported carrier"&#10;}]' doc:name="Set Payload" doc:id="33336fb1-a83b-4119-bdf6-be4749e290cf" mimeType="application/json"/>
+						<set-variable value="#[400]" doc:name="Set Variable" doc:id="99a4fa0b-2fbf-4fee-92a6-e92cca8f0285" variableName="httpStatus"/>
+					</otherwise>
+				</choice>
+    </when>
+			<otherwise>
+        <set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: false,&#10;  message: "Invalid webhook signature"&#10;}]' mimeType="application/json" />
+        <set-variable variableName="httpStatus" value="#[401]" />
+    </otherwise>
+</choice>
+		<error-handler ref="Global_Error_Handler"/>
+    </flow>
+	<flow name="real-time-shipment-tracking-apiFlow1" doc:id="7497c5dc-05bc-4bbf-a551-09673638cf1f" >
+		<http:listener doc:name="mysql-connection-test-flow" doc:id="aa065c04-26ef-4f1a-8832-ac33cd3587fd" config-ref="real-time-shipment-tracking-api-httpListenerConfig" path="/db-test">
+			<http:response >
+				<http:body ><![CDATA[#[%dw 2.0
+output application/json
+---
+payload]]]></http:body>
+			</http:response>
+		</http:listener>
+		<db:select doc:name="Select" doc:id="78e46e64-f8e5-4242-85a1-f8e91c913046" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT 1 AS connection_test]]></db:sql>
+		</db:select>
+	</flow>
+	<flow name="process-shipment-event-flow" doc:id="7ab00ac9-5ed3-442f-8f05-c856df87919a" >
+		<db:select doc:name="Check Duplicate Event" doc:id="ee371d0a-7d4b-4321-b810-3812904d921a" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT event_seq
+FROM shipment_tracking_events
+WHERE carrier_code = :carrierCode
+  AND carrier_event_id = :carrierEventId
+LIMIT 1]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+  carrierCode: vars.event.carrierCode,
+  carrierEventId: vars.event.carrierEventId
+}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="Choice" doc:id="abc8de6f-393d-4594-9159-0934db3ebcac" >
+			<when expression="#[!isEmpty(payload)]">
+				<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: true,&#10;  message: "Duplicate event ignored",&#10;  trackingNumber: vars.event.trackingNumber,&#10;  duplicate: true&#10;}]' doc:name="Set Payload" doc:id="ee6e3c73-6164-43ce-a20d-c2a666a3e750" />
+				<set-variable value="#[200]" doc:name="Set Duplicate HTTP Status" doc:id="75f9ad53-fb52-4fdd-81a7-fa4c8de11893" variableName="httpStatus"/>
+			</when>
+			<otherwise >
+				<db:select doc:name="Lookup Shipment" doc:id="ad99e654-91ea-42a2-9402-2404282a148c" config-ref="Database_Config">
+					<db:sql ><![CDATA[SELECT shipment_id, carrier_code, tracking_number,
+       current_milestone, milestone_rank,
+       promised_delivery, estimated_delivery,
+       order_id, customer_id, customer_email, is_delayed
+FROM shipments
+WHERE carrier_code = :carrierCode
+  AND tracking_number = :trackingNumber
+LIMIT 1]]></db:sql>
+					<db:input-parameters ><![CDATA[#[{
+  carrierCode: vars.event.carrierCode,
+  trackingNumber: vars.event.trackingNumber
+}]]]></db:input-parameters>
+				</db:select>
+				<choice doc:name="Choice" doc:id="7cd7d609-ba5d-42b0-a3df-0f7653d3c6cd" >
+					<when expression="#[!isEmpty(payload)]">
+						<set-variable value="#[payload[0]]" doc:name="Store Shipment" doc:id="78a0091a-48c9-43b7-b579-6969b3da72ec" variableName="shipment"/>
+						<db:insert doc:name="Insert Tracking Event" doc:id="62c13604-3f25-419e-b3b2-d29636c62948" config-ref="Database_Config">
+							<db:sql ><![CDATA[INSERT INTO shipment_tracking_events
+(
+    carrier_code,
+    carrier_event_id,
+    shipment_id,
+    tracking_number,
+    carrier_status,
+    normalised_status,
+    event_datetime,
+    facility_code,
+    city,
+    state,
+    correlation_id
+)
+VALUES
+(
+    :carrierCode,
+    :carrierEventId,
+    :shipmentId,
+    :trackingNumber,
+    :carrierStatus,
+    :normalisedStatus,
+    :eventDateTime,
+    :facilityCode,
+    :city,
+    :state,
+    :correlationId
+)]]></db:sql>
+							<db:input-parameters ><![CDATA[#[{
+  carrierCode: vars.event.carrierCode,
+  carrierEventId: vars.event.carrierEventId,
+  shipmentId: vars.shipment.shipment_id,
+  trackingNumber: vars.event.trackingNumber,
+  carrierStatus: vars.event.rawStatusCode,
+  normalisedStatus: vars.event.normalisedMilestone,
+  eventDateTime: vars.event.eventDateTime,
+  facilityCode: vars.event.facilityCode,
+  city: vars.event.city,
+  state: vars.event.state,
+  correlationId: correlationId
+}]]]></db:input-parameters>
+						</db:insert>
+						<db:update doc:name="Update Shipment Milestone" doc:id="89f997a2-4cfb-42e4-8c6d-26581a52750c" config-ref="Database_Config">
+							<db:sql ><![CDATA[UPDATE shipments
+SET current_milestone = :milestone,
+    milestone_rank = :milestoneRank,
+    last_event_time = :eventTime,
+    last_location = :lastLocation,
+    estimated_delivery = COALESCE(:revisedEta, estimated_delivery),
+    is_delayed = CASE
+      WHEN COALESCE(:revisedEta, estimated_delivery) > promised_delivery
+      THEN 1 ELSE 0
+    END
+WHERE shipment_id = :shipmentId
+  AND COALESCE(milestone_rank, 0) < :milestoneRank]]></db:sql>
+							<db:input-parameters ><![CDATA[#[{
+  milestone: vars.event.normalisedMilestone,
+  milestoneRank: vars.event.milestoneRank,
+  eventTime: vars.event.eventDateTime,
+  lastLocation: vars.event.city,
+  revisedEta: vars.event.revisedEta,
+  shipmentId: vars.shipment.shipment_id
+}]]]></db:input-parameters>
+						</db:update>
+						<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: true,&#10;  message: "Shipment event processed",&#10;  trackingNumber: vars.event.trackingNumber,&#10;  status: vars.event.normalisedMilestone&#10;}]' doc:name="Set Payload" doc:id="34e081c2-c6e9-47f9-b670-a075bc782517" />
+						<set-variable value="#[200]" doc:name="Set Variable" doc:id="1d984ea5-ff72-49f1-a7c5-1e2046a0a56c" variableName="httpStatus"/>
+					</when>
+					<otherwise >
+						<db:insert doc:name="Store Pending Event" doc:id="18436c37-7d04-4ab0-8d1a-cc292a24a01f" config-ref="Database_Config">
+							<db:sql ><![CDATA[INSERT INTO pending_tracking_events
+    (carrier_code, tracking_number, raw_payload, retry_count,
+     expires_at, carrier_event_id)
+VALUES
+    (:carrierCode, :trackingNumber, :rawPayload, 0,
+     DATE_ADD(NOW(), INTERVAL 48 HOUR), :carrierEventId)]]></db:sql>
+							<db:input-parameters ><![CDATA[#[{
+  carrierCode: vars.event.carrierCode,
+  trackingNumber: vars.event.trackingNumber,
+  rawPayload: write(vars.rawBody, "application/json"),
+  carrierEventId: vars.event.carrierEventId
+}]]]></db:input-parameters>
+						</db:insert>
+						<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  received: true,&#10;  message: "Shipment not found; event stored for retry",&#10;  trackingNumber: vars.event.trackingNumber,&#10;  pending: true&#10;}]' doc:name="Set Payload" doc:id="08fe6d69-69e9-4356-a0f0-168d78672ad4" />
+						<set-variable value="#[202]" doc:name="Set Variable" doc:id="03391800-f9ef-4c58-9e44-e7872f3ab6b0" variableName="httpStatus"/>
+					</otherwise>
+				</choice>
+			</otherwise>
+		</choice>
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+	<flow name="retry-pending-shipment-events-flow" doc:id="e4585df2-7322-4335-9405-7912213b0b81" >
+		<scheduler doc:name="Scheduler" doc:id="2178045b-580b-4ce6-993d-9d27c4be80f2" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="1" timeUnit="MINUTES"/>
+			</scheduling-strategy>
+		</scheduler>
+		<db:update doc:name="Mark expired tracking events" doc:id="5c12e08c-37d1-4d01-94c1-ed9dbc9762a8" config-ref="Database_Config">
+			<db:sql ><![CDATA[UPDATE pending_tracking_events
+SET expiry_reason =
+    'Expired after 48-hour retention period; shipment not resolved'
+WHERE expires_at <= NOW()
+  AND expiry_reason IS NULL;]]></db:sql>
+		</db:update>
+		<db:select doc:name="Find Resolvable Pending Events" doc:id="0fed848e-250f-4b9e-a241-25ef2626c3b5" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT
+    p.pending_seq,
+    p.carrier_code,
+    p.tracking_number,
+    p.carrier_event_id,
+    p.raw_payload,
+    p.retry_count,
+    p.expires_at
+FROM pending_tracking_events p
+INNER JOIN shipments s
+    ON s.carrier_code = p.carrier_code
+   AND s.tracking_number = p.tracking_number
+WHERE p.expires_at > NOW()
+ORDER BY p.created_at ASC
+LIMIT 50;]]></db:sql>
+		</db:select>
+		<foreach doc:name="Process Each Pending Event" doc:id="c0cd411c-b372-47c3-8155-a3d7c7c57b8e" collection="#[payload]">
+			<logger level="INFO" doc:name="Log Pending Event" doc:id="16e2d7b6-8100-4fed-9780-a40d19ed25c1" message='#["Retrying pending event: " ++&#10;   (payload.carrier_event_id default "NO_EVENT_ID") ++&#10;   " for tracking number: " ++&#10;   (payload.tracking_number default "NO_TRACKING_NUMBER")]'/>
+			<choice doc:name="Choice" doc:id="98dd2619-3408-43f2-a163-2a9db5a5195d" >
+				<when expression="#[!isEmpty(payload.tracking_number)]">
+					<set-variable value="#[payload]" doc:name="Set Variable" doc:id="7bc00821-f0e9-4d30-b351-9b8cd3216e98" variableName="pendingEvent"/>
+					<db:select doc:name="Check Shipment Exists" doc:id="1620c500-bdce-44da-9907-fa589071e4e6" config-ref="Database_Config">
+						<db:sql ><![CDATA[SELECT shipment_id, carrier_code, tracking_number,
+       current_milestone, milestone_rank
+FROM shipments
+WHERE carrier_code = :carrierCode
+  AND tracking_number = :trackingNumber
+LIMIT 1]]></db:sql>
+						<db:input-parameters ><![CDATA[#[{
+  carrierCode: vars.pendingEvent.carrier_code,
+  trackingNumber: vars.pendingEvent.tracking_number
+}]]]></db:input-parameters>
+					</db:select>
+					<choice doc:name="Choice" doc:id="db781590-e0ec-4fdd-aeb0-13fbd0bf8385" >
+						<when expression="#[!isEmpty(payload)]">
+							<ee:transform doc:name="Transform Message" doc:id="9e4a8e25-f502-4dea-a922-a5babac3d323" >
+								<ee:message >
+									<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+read(vars.pendingEvent.raw_payload as String, "application/json")]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<choice doc:name="Choice" doc:id="55c9c421-c5e7-4419-949e-1f4531cac1f4" >
+								<when expression='#[upper(vars.pendingEvent.carrier_code) == "BLUEDART"]'>
+									<set-variable value="#[vars.pendingEvent.raw_payload]" doc:name="Set Variable" doc:id="4ee2158a-b704-42a5-804c-c388581326db" variableName="rawBody"/>
+									<ee:transform doc:name="Transform Message" doc:id="380509d3-7852-457a-8cbf-c647642177e2">
+										<ee:message>
+											<ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+var body = payload
+var status = upper(trim(body.statusCode default ""))
+var milestone =
+    if (status == "PU") "PICKED_UP"
+    else if (status == "IT") "IN_TRANSIT"
+    else if (status == "OOD") "OUT_FOR_DELIVERY"
+    else if (status == "DL") "DELIVERED"
+    else if (status == "EX") "EXCEPTION"
+    else if (status == "RTO") "RETURN_TO_ORIGIN"
+    else "EXCEPTION"
+---
+{
+    received: true,
+    carrierCode: upper(vars.pendingEvent.carrier_code),
+    carrierEventId: vars.pendingEvent.carrier_event_id default "",
+    trackingNumber: body.awbNumber default "",
+    shipmentId: body.referenceNumber default "",
+    rawStatusCode: body.statusCode default "",
+    normalisedMilestone: milestone,
+    milestoneRank:
+        if (milestone == "LABEL_CREATED") 1
+        else if (milestone == "PICKED_UP") 2
+        else if (milestone == "IN_TRANSIT") 3
+        else if (milestone == "ARRIVED_AT_HUB") 4
+        else if (milestone == "OUT_FOR_DELIVERY") 5
+        else if (milestone == "DELIVERY_ATTEMPTED") 6
+        else if (milestone == "DELIVERED") 7
+        else 0,
+    eventDateTime: body.eventDateTime default null,
+    facilityCode: body.scanLocation.facilityCode default "",
+    city: body.scanLocation.city default "",
+    state: body.scanLocation.state default "",
+    country: body.scanLocation.country default "IN",
+    latitude: body.scanLocation.latitude default null,
+    longitude: body.scanLocation.longitude default null,
+    revisedEta: body.revisedEta default null,
+    remarks: body.remarks default "",
+    statusAdvanced: false,
+    notificationQueued: false
+}
+]]></ee:set-payload>
+										</ee:message>
+									</ee:transform>
+									<set-variable value="#[payload]" doc:name="Set Variable" doc:id="6fb4f7da-e7dc-4b9a-b581-cb9c484eaf76" variableName="event"/>
+									<flow-ref doc:name="Flow Reference" doc:id="95ee848f-9365-485e-b420-db58eb40ef6b" name="process-shipment-event-flow"/>
+									<db:delete doc:name="Delete Processed Pending Event" doc:id="64d1c4cf-7a21-4fca-bb61-75d347b2bb78" config-ref="Database_Config">
+										<db:sql ><![CDATA[DELETE FROM pending_tracking_events
+WHERE pending_seq = :pendingSeq;]]></db:sql>
+										<db:input-parameters ><![CDATA[#[{
+  pendingSeq: vars.pendingEvent.pending_seq
+}]]]></db:input-parameters>
+									</db:delete>
+								</when>
+								<when expression='#[upper(vars.pendingEvent.carrier_code) == "DELHIVERY"]'>
+									<set-variable value="#[vars.pendingEvent.raw_payload]" doc:name="Set Variable" doc:id="070df9ed-81c2-4c6b-a310-f56be8326450" variableName="rawBody"/>
+									<ee:transform doc:name="Transform Message" doc:id="625fb66c-bc7f-4061-8b55-f73aca96824d" >
+										<ee:message >
+											<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var body = payload
+var status = upper(trim(body.shipment_status default ""))
+var milestone =
+    if (status == "PICKED UP") "PICKED_UP"
+    else if (status == "IN TRANSIT") "IN_TRANSIT"
+    else if (status == "OUT FOR DELIVERY") "OUT_FOR_DELIVERY"
+    else if (status == "DELIVERED") "DELIVERED"
+    else if (status == "EXCEPTION") "EXCEPTION"
+    else if (status == "RTO") "RETURN_TO_ORIGIN"
+    else "EXCEPTION"
+---
+{
+    received: true,
+    carrierCode: upper(vars.pendingEvent.carrier_code),
+    carrierEventId: vars.pendingEvent.carrier_event_id default "",
+    trackingNumber: body.waybill default "",
+    shipmentId: body.referenceNumber default "",
+    rawStatusCode: body.shipment_status default "",
+    normalisedMilestone: milestone,
+    milestoneRank:
+        if (milestone == "LABEL_CREATED") 1
+        else if (milestone == "PICKED_UP") 2
+        else if (milestone == "IN_TRANSIT") 3
+        else if (milestone == "ARRIVED_AT_HUB") 4
+        else if (milestone == "OUT_FOR_DELIVERY") 5
+        else if (milestone == "DELIVERY_ATTEMPTED") 6
+        else if (milestone == "DELIVERED") 7
+        else 0,
+    eventDateTime: body.status_date default null,
+    facilityCode: body.location.facilityCode default "",
+    city: body.location.city default "",
+    state: body.location.state default "",
+    country: body.location.country default "IN",
+    latitude: body.location.latitude default null,
+    longitude: body.location.longitude default null,
+    revisedEta: body.expected_delivery_date default null,
+    remarks: body.status_description default "",
+    statusAdvanced: false,
+    notificationQueued: false
+}
+]]></ee:set-payload>
+										</ee:message>
+									</ee:transform>
+									<set-variable value="#[payload]" doc:name="Store Normalized Event" doc:id="12e29272-2555-4af9-94c1-4814f173c5ee" variableName="event"/>
+									<flow-ref doc:name="Flow Reference" doc:id="9390fbdb-ee51-480c-9e49-8c2c038211f6" name="process-shipment-event-flow"/>
+									<db:delete doc:name="Delete Processed Pending Event" doc:id="36f7aa4d-8a6f-4b60-8e4f-61c16f23e8b6" config-ref="Database_Config">
+										<db:sql ><![CDATA[DELETE FROM pending_tracking_events
+WHERE pending_seq = :pendingSeq;]]></db:sql>
+										<db:input-parameters ><![CDATA[#[{
+  pendingSeq: vars.pendingEvent.pending_seq
+}]]]></db:input-parameters>
+									</db:delete>
+								</when>
+								<otherwise >
+<logger level="WARN" doc:name="Log Unsupported" doc:id="5db62785-5d6c-428d-ba3f-9f2feaded0ed" message='#["Unsupported carrier in pending event; carrier=" ++ ((vars.pendingEvent.carrier_code default "UNKNOWN") as String) ++ "; pendingSeq=" ++ ((vars.pendingEvent.pending_seq default "UNKNOWN") as String)]'/>
+								</otherwise>
+							</choice>
+						</when>
+						<otherwise >
+							<logger level="WARN" doc:name="Log Shipment Missing During Retry" doc:id="175e3b4a-cf8d-4ce2-8283-7cc584a71ac0" message='#["Shipment lookup returned no result during retry; carrier=" ++&#10;  ((vars.pendingEvent.carrier_code default "UNKNOWN") as String) ++&#10;  "; trackingNumber=" ++&#10;  ((vars.pendingEvent.tracking_number default "UNKNOWN") as String) ++&#10;  "; pendingSeq=" ++&#10;  ((vars.pendingEvent.pending_seq default "UNKNOWN") as String)]'/>
+						</otherwise>
+					</choice>
+				</when>
+				<otherwise >
+<logger level="WARN" doc:name="Log Pending Event Missing Tracking Number" doc:id="06b38910-eb52-483f-a90c-c18307200e70" message='#["Pending event has no tracking number; pendingSeq=" ++ ((payload.pending_seq default "UNKNOWN") as String) ++ "; carrier=" ++ ((payload.carrier_code default "UNKNOWN") as String)]'/>
+				</otherwise>
+			</choice>
+		</foreach>
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+	<flow name="retry-unnotified-notifications-flow" doc:id="213222bd-bf17-4a68-8301-63a9bf44c934">
+		<scheduler doc:name="Scheduler" doc:id="914df8d4-d18f-4180-a6fa-a9b12358909e" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="30" timeUnit="SECONDS"/>
+			</scheduling-strategy>
+		</scheduler>
+		<db:select doc:name="Select" doc:id="e6d6bd49-44c5-48e6-bc94-8eaf77c76638" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT e.carrier_code,
+       e.carrier_event_id,
+       e.shipment_id,
+       e.tracking_number,
+       e.carrier_status,
+       e.normalised_status,
+       e.event_datetime,
+       e.facility_code,
+       e.city,
+       e.state,
+       e.correlation_id,
+       s.order_id,
+       s.customer_id,
+       s.customer_email,
+       s.estimated_delivery,
+       s.promised_delivery,
+       s.is_delayed
+FROM shipment_tracking_events e
+INNER JOIN shipments s
+        ON s.shipment_id = e.shipment_id
+WHERE e.notified = 0
+  AND e.normalised_status IN (
+      'PICKED_UP',
+	  'OUT_FOR_DELIVERY',
+      'DELIVERY_ATTEMPTED',
+      'DELIVERED',
+      'RETURNED',
+      'EXCEPTION'
+  )
+ORDER BY e.event_datetime ASC
+LIMIT 100]]></db:sql>
+		</db:select>
+		<foreach doc:name="For Each" doc:id="d318acef-f39c-4bb8-a3a2-4cf69fbc4de5" collection="#[payload]">
+			<set-variable value="#[payload]" doc:name="Set Variable" doc:id="9674b341-6d5c-4c14-a88b-4f4097401462" variableName="retryEvent"/>
+			<ee:transform doc:name="Transform Message" doc:id="ccc6cc18-182c-4f40-81bf-103906885a2b" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var event = payload
+---
+{
+  correlationId: event.correlation_id,
+  eventType: "SHIPMENT_MILESTONE_REACHED",
+  eventTimestamp: event.event_datetime,
+  publishedAt: now(),
+  payload: {
+    shipmentId: event.shipment_id,
+    orderId: event.order_id,
+    customerId: event.customer_id,
+    customerEmail: event.customer_email,
+    carrierCode: event.carrier_code,
+    trackingNumber: event.tracking_number,
+    milestone: event.normalised_status,
+    carrierStatus: event.carrier_status,
+    statusDescription: event.carrier_status,
+    currentLocation: {
+      city: event.city,
+      state: event.state,
+      facilityCode: event.facility_code
+    },
+    estimatedDelivery: event.estimated_delivery,
+    promisedDelivery: event.promised_delivery,
+    isDelayed: event.is_delayed,
+    customerFacing: true
+  }
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<jms:publish doc:name="Publish" doc:id="dbf24d7f-6bb4-4c06-ad02-b377d391838a" config-ref="JMS_Config" destination="shipment.notification.queue" sendCorrelationId="ALWAYS" persistentDelivery="true">
+			<jms:message correlationId="#[payload.correlationId]" />
+		</jms:publish>
+			<db:update doc:name="Update" doc:id="7bfb1bf0-d8bc-4825-b21f-5c4bb6639fec" config-ref="Database_Config">
+				<db:sql ><![CDATA[UPDATE shipment_tracking_events
+SET notified = 1
+WHERE carrier_code = :carrierCode
+  AND carrier_event_id = :carrierEventId]]></db:sql>
+				<db:input-parameters ><![CDATA[#[{
+  carrierCode: vars.retryEvent.carrier_code,
+  carrierEventId: vars.retryEvent.carrier_event_id
+}]]]></db:input-parameters>
+			</db:update>
+		</foreach>
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+	<flow name="Consume-Shipment-Notifications" doc:id="ad59af4a-5ece-4236-afd1-6213717887b1" >
+		<jms:listener doc:name="On New Message" doc:id="859454fa-3a0c-40e0-85fc-328915a88f66" config-ref="JMS_Config" destination="shipment.notification.queue" ackMode="AUTO">
+			<jms:response timeToLiveUnit="DAYS">
+			</jms:response>
+		</jms:listener>
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="f5afd5a8-3564-4298-af48-7f495e9a9a28" variableName="notification"/>
+		<db:insert doc:name="Record Notification ID" doc:id="cf0657f5-2592-4aa6-8e91-864fe092f1ac" config-ref="Database_Config">
+			<db:sql ><![CDATA[INSERT IGNORE INTO consumed_notifications (correlation_id)
+VALUES (:correlationId)]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{ correlationId: vars.notification.correlationId }]]]></db:input-parameters>
+		</db:insert>
+		<set-variable value="#[payload.affectedRows &gt; 0]" doc:name="Set New Notification Flag" doc:id="4e1fda53-2fd3-4a23-a069-77994fe49465" variableName="isNewNotification"/>
+		<choice doc:name="Choice" doc:id="2c786882-2dc5-4f7c-8b84-11cab71794ff" >
+			<when expression="#[vars.isNewNotification]">
+				<logger level="INFO" doc:name="Log Consumed Shipment Notification" doc:id="359a2116-05e0-42a2-aa88-7e59fad0970c" message='#[output text/plain ---&#10;"Shipment notification consumed; correlationId=" ++&#10;((vars.notification.correlationId default "none") as String) ++&#10;"; shipmentId=" ++ ((vars.notification.payload.shipmentId default "unknown") as String) ++&#10;"; milestone=" ++ ((vars.notification.payload.milestone default "unknown") as String) ++&#10;"; status=" ++ ((vars.notification.payload.statusDescription default "unknown") as String)]' />
+			</when>
+			<otherwise >
+				<logger level="INFO" doc:name="Logger" doc:id="1313e832-30bd-462b-a85d-9952e6e00a8d" message='#[output text/plain ---&#10;"Duplicate notification skipped; correlationId=" ++&#10;((vars.notification.correlationId default "none") as String)]'/>
+			</otherwise>
+		</choice>
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+	<error-handler name="Global_Error_Handler" doc:id="7853f398-eb8f-4151-b198-002b274ab3b6">
+    <on-error-propagate type="APIKIT:BAD_REQUEST" enableNotifications="true" logException="true" doc:name="Handle HTTP 400">
+        <ee:transform doc:name="Set HTTP 400 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 400, message: "Bad request" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">400</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+    <on-error-propagate type="APIKIT:NOT_FOUND" enableNotifications="true" logException="true" doc:name="Handle HTTP 404">
+        <ee:transform doc:name="Set HTTP 404 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 404, message: "Resource not found" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+    <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED" enableNotifications="true" logException="true" doc:name="Handle HTTP 405">
+        <ee:transform doc:name="Set HTTP 405 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 405, message: "Method not allowed" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">405</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+    <on-error-propagate type="APIKIT:NOT_ACCEPTABLE" enableNotifications="true" logException="true" doc:name="Handle HTTP 406">
+        <ee:transform doc:name="Set HTTP 406 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 406, message: "Not acceptable" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">406</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+    <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE" enableNotifications="true" logException="true" doc:name="Handle HTTP 415">
+        <ee:transform doc:name="Set HTTP 415 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 415, message: "Unsupported media type" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">415</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+    <on-error-propagate type="APIKIT:NOT_IMPLEMENTED" enableNotifications="true" logException="true" doc:name="Handle HTTP 501">
+        <ee:transform doc:name="Set HTTP 501 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 501, message: "Not implemented" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">501</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+    <on-error-propagate type="ANY" enableNotifications="true" logException="true" doc:name="Handle HTTP 500">
+        <ee:transform doc:name="Set HTTP 500 Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: true, status: 500, message: "Internal server error" }]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus">500</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </on-error-propagate>
+</error-handler>
+	
+</mule>

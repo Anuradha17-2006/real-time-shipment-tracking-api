@@ -1,0 +1,124 @@
+#%RAML 1.0
+title: Real-Time Shipment Tracking API
+version: v1
+baseUri: /api
+mediaType: application/json
+
+/webhooks:
+  /carriers:
+    /{carrierCode}:
+      uriParameters:
+        carrierCode:
+          description: Code of the carrier sending the shipment update.
+          type: string
+          example: BLUEDART
+
+      post:
+        description: Receives real-time shipment tracking updates from carriers.
+
+        headers:
+          X-Carrier-Signature:
+            description: Signature used to authenticate Blue Dart webhook requests.
+            type: string
+            required: false
+            example: "sha256=example-signature"
+
+          X-API-Key:
+            description: Required for Delhivery requests only.
+            type: string
+            required: false
+
+          X-Carrier-Event-Id:
+            description: Unique identifier for the carrier event.
+            type: string
+            required: true
+            example: "BD-EVENT-001"
+
+          X-Correlation-ID:
+            description: Optional identifier used to trace a request.
+            type: string
+            required: false
+            example: "corr-12345"
+
+        body:
+          application/json:
+            examples:
+              blueDart:
+                description: Blue Dart shipment tracking event.
+                value:
+                  awbNumber: "BD123456789"
+                  referenceNumber: "SHIP001"
+                  statusCode: "IT"
+                  eventDateTime: "2026-10-10T09:00:00"
+                  scanLocation:
+                    facilityCode: "BLR01"
+                    city: "Bengaluru"
+                    state: "Karnataka"
+                    country: "IN"
+                  revisedEta: null
+                  remarks: "Shipment in transit"
+
+              delhivery:
+                description: Delhivery shipment tracking event.
+                value:
+                  waybill: "DLTEST2002"
+                  referenceNumber: "SHIP-DL-002"
+                  shipment_status: "IN TRANSIT"
+                  status_date: "2026-10-10T09:00:00"
+                  location:
+                    facilityCode: "BLR01"
+                    city: "Bengaluru"
+                    state: "Karnataka"
+                    country: "IN"
+                  expected_delivery_date: "2026-10-12"
+                  status_description: "Shipment in transit"
+
+        responses:
+          200:
+            description: Event processed successfully or duplicate event ignored.
+            body:
+              application/json:
+                examples:
+                  processed:
+                    value:
+                      success: true
+                      message: "Shipment event processed successfully"
+                      duplicate: false
+
+                  duplicate:
+                    value:
+                      success: true
+                      message: "Duplicate event ignored"
+                      duplicate: true
+
+          202:
+            description: Event accepted for pending processing because the shipment is not registered yet.
+            body:
+              application/json:
+                example:
+                  success: true
+                  message: "Event accepted for pending processing"
+
+          400:
+            description: Invalid request or shipment event.
+            body:
+              application/json:
+                example:
+                  success: false
+                  message: "Invalid shipment event"
+
+          401:
+            description: Missing or invalid carrier authentication credentials.
+            body:
+              application/json:
+                example:
+                  success: false
+                  message: "Invalid webhook authentication"
+
+          500:
+            description: Internal server error.
+            body:
+              application/json:
+                example:
+                  success: false
+                  message: "Internal server error"
